@@ -190,33 +190,6 @@ Return the configuration."
      (goto-char (point-min))
      ,@body))
 
-(defun flycheck-haskell-get-stack-path (path-name)
-  "Return one of the named paths on stack"
-  (car (process-lines "stack" "path" path-name)))
-
-(defun flycheck-haskell-stack-get-ghc ()
-  "Return the ghc executable that stack will use"
-  (car (process-lines "stack" "exec" "--" "which" "ghc" )))
-
-(defun flycheck-haskell-is-stack-project ()
-   "Return if this is a stack project"
-   (and
-          (locate-dominating-file (buffer-file-name) "stack.yaml")
-          (executable-find "stack")))
-
-(defun flycheck-haskell-stack ()
-  "Find if there is a stack.yaml file for the current buffer.
-If there is, return an alist with package database and other
-properties"
-  (list
-   (cons 'package-databases
-         (list
-                (flycheck-haskell-get-stack-path "--snapshot-pkg-db")
-                (flycheck-haskell-get-stack-path "--local-pkg-db")
-                ))
-   (cons 'ghc-executable (flycheck-haskell-stack-get-ghc))
-   ))
-
 (defun flycheck-haskell-get-config-value (key)
   "Get the value of a configuration KEY from this buffer.
 
@@ -262,6 +235,34 @@ buffer."
                          flycheck-haskell-sandbox-config))
     (flycheck-haskell-parse-config-file flycheck-haskell-sandbox-config-keys
                                         file-name)))
+
+;;; Stack support
+(defun flycheck-haskell-get-stack-path (path-name)
+  "Return one of the named paths on stack"
+  (car (process-lines "stack" "path" path-name)))
+
+(defun flycheck-haskell-stack-get-ghc ()
+  "Return the ghc executable that stack will use"
+  (car (process-lines "stack" "exec" "--" "which" "ghc" )))
+
+(defun flycheck-haskell-is-stack-project ()
+   "Return if this is a stack project"
+   (and
+          (locate-dominating-file (buffer-file-name) "stack.yaml")
+          (executable-find "stack")))
+
+(defun flycheck-haskell-stack ()
+  "Find if there is a stack.yaml file for the current buffer.
+If there is, return an alist with package database and other
+properties"
+  (list
+   (cons 'package-databases
+         (list
+                (flycheck-haskell-get-stack-path "--snapshot-pkg-db")
+                (flycheck-haskell-get-stack-path "--local-pkg-db")
+                ))
+   (cons 'ghc-executable (flycheck-haskell-stack-get-ghc))
+   ))
 
 
 ;;; Buffer setup
