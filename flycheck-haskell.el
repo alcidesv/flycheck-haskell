@@ -49,6 +49,11 @@
 ;; Haskell syntax checkers in Flycheck to use the package database from the
 ;; Sandbox.
 
+;;;; stack
+
+;; If stack is a valid executable and a file stack.yaml is found somewhere
+;; going upward, read as much settings as possible by invoking stack.
+
 ;;;; Setup
 
 ;; (add-hook 'flycheck-mode-hook #'flycheck-haskell-setup)
@@ -98,8 +103,10 @@ scripts to extract information from Cabal files."
 
 (defun flycheck-haskell--get-flags ()
   "Get GHC flags to run the Cabal helper."
-  (process-lines flycheck-haskell-runhaskell
-                 flycheck-haskell-flags-helper))
+  (if (flycheck-haskell-is-stack-project)
+      (process-lines "stack" "runghc" "--" flycheck-haskell-flags-helper)
+      (process-lines flycheck-haskell-runhaskell flycheck-haskell-flags-helper)
+  ))
 
 (defun flycheck-haskell-read-cabal-configuration (cabal-file)
   "Read the Cabal configuration from CABAL-FILE."
@@ -183,6 +190,33 @@ Return the configuration."
      (goto-char (point-min))
      ,@body))
 
+(defun flycheck-haskell-get-stack-path (path-name)
+  "Return one of the named paths on stack"
+  (car (process-lines "stack" "path" path-name)))
+
+(defun flycheck-haskell-stack-get-ghc ()
+  "Return the ghc executable that stack will use"
+  (car (process-lines "stack" "exec" "--" "which" "ghc" )))
+
+(defun flycheck-haskell-is-stack-project ()
+   "Return if this is a stack project"
+   (and
+          (locate-dominating-file (buffer-file-name) "stack.yaml")
+          (executable-find "stack")))
+
+(defun flycheck-haskell-stack ()
+  "Find if there is a stack.yaml file for the current buffer.
+If there is, return an alist with package database and other
+properties"
+  (list
+   (cons 'package-databases
+         (list
+                (flycheck-haskell-get-stack-path "--snapshot-pkg-db")
+                (flycheck-haskell-get-stack-path "--local-pkg-db")
+                ))
+   (cons 'ghc-executable (flycheck-haskell-stack-get-ghc))
+   ))
+
 (defun flycheck-haskell-get-config-value (key)
   "Get the value of a configuration KEY from this buffer.
 
@@ -243,6 +277,28 @@ buffer."
     (setq-local flycheck-ghc-args
                 (append .other-options flycheck-ghc-args))))
 
+(defun flycheck-haskell-configure-by-stack ()
+  "Invoke stack to get a config"
+  (let-alist (flycheck-haskell-stack)
+    (when .package-databases
+      (setq-local flycheck-ghc-package-databases .package-databases)
+      (setq-local flycheck-ghc-no-user-package-database t))
+    (when .ghc-executable
+      (setq-local flycheck-haskell-ghc-executable .ghc-executable))
+   ))
+
+(defun flycheck-haskell-configure-classic ()
+  "Configure with Sandbox and stuff"
+  (let-alist (flycheck-haskell-get-cabal-config)
+    (when .with-compiler
+      (setq-local flycheck-haskell-ghc-executable .with-compiler)))
+
+  (let-alist (flycheck-haskell-get-sandbox-config)
+    (when .package-db
+      (setq-local flycheck-ghc-package-databases
+                  (cons .package-db flycheck-ghc-package-databases))
+      (setq-local flycheck-ghc-no-user-package-database t))))
+
 (defun flycheck-haskell-configure ()
   "Set paths and package database for the current project."
   (interactive)
@@ -251,15 +307,11 @@ buffer."
                  (config (flycheck-haskell-get-configuration cabal-file)))
       (flycheck-haskell-process-configuration config))
 
-    (let-alist (flycheck-haskell-get-cabal-config)
-      (when .with-compiler
-        (setq-local flycheck-haskell-ghc-executable .with-compiler)))
-
-    (let-alist (flycheck-haskell-get-sandbox-config)
-      (when .package-db
-        (setq-local flycheck-ghc-package-databases
-                    (cons .package-db flycheck-ghc-package-databases))
-        (setq-local flycheck-ghc-no-user-package-database t)))))
+    (if (flycheck-haskell-is-stack-project)
+        (flycheck-haskell-configure-by-stack)
+        (flycheck-haskell-configure-classic)
+        )
+    ))
 
 ;;;###autoload
 (defun flycheck-haskell-setup ()
@@ -269,8 +321,9 @@ If the current file is part of a Cabal project, configure
 Flycheck to take the module paths of the Cabal projects into
 account.
 
-Also search for Cabal sandboxes and add them to the module search
-path as well."
+If the current project uses stack, configure ghc executable and
+package databases accordingly. Otherwise, search for Cabal sandboxes
+and add them to the module search path as well."
   (add-hook 'hack-local-variables-hook #'flycheck-haskell-configure))
 
 (provide 'flycheck-haskell)
